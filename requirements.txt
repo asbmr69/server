@@ -2,3 +2,4 @@ flask
 flask_sqlalchemy
 pyjwt
 gunicorn
+psycopg2
