@@ -9,7 +9,7 @@ JWT_SECRET = os.getenv("JWT_SECRET", "replace-with-secure-jwt-secret")
 JWT_ALG = "HS256"
 TRIAL_DAYS = int(os.getenv("TRIAL_DAYS", "2"))
 ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "replace-admin-key")  # protect this
-OFFLINE_GRACE_DAYS = int(os.getenv("OFFLINE_GRACE_DAYS", "7"))
+OFFLINE_GRACE_DAYS = int(os.getenv("OFFLINE_GRACE_DAYS", "5"))
 DB_URI = os.getenv("DATABASE_URL", "sqlite:///licenses.db")
 PORT = int(os.getenv("PORT", "5000"))
 
@@ -17,6 +17,8 @@ app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
+with app.app_context():
+    db.create_all()
 
 # ---------------- MODELS ----------------
 class License(db.Model):
