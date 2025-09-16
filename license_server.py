@@ -13,15 +13,18 @@ OFFLINE_GRACE_DAYS = int(os.getenv("OFFLINE_GRACE_DAYS", "5"))
 DB_URI = os.getenv("DATABASE_URL", "sqlite:///licenses.db")
 PORT = int(os.getenv("PORT", "5000"))
 
+# Fix for Render's PostgreSQL URL format
+if DB_URI and DB_URI.startswith("postgres://"):
+    DB_URI = DB_URI.replace("postgres://", "postgresql://", 1)
+
 app = Flask(__name__)
 app.config['SQLALCHEMY_DATABASE_URI'] = DB_URI
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 db = SQLAlchemy(app)
-with app.app_context():
-    db.create_all()
 
 # ---------------- MODELS ----------------
-class License(db.Model):
+class License(db.Model):   
+    __tablename__ = 'license'
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String, unique=True, nullable=False)   # paid license key or SKU
     kind = db.Column(db.String, default="paid")               # 'paid' or 'trial'
@@ -32,6 +35,7 @@ class License(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
 class Activation(db.Model):
+    __tablename__ = 'activation'
     id = db.Column(db.Integer, primary_key=True)
     license_id = db.Column(db.Integer, db.ForeignKey("license.id"), nullable=False)
     hwid = db.Column(db.String, nullable=False)
@@ -40,6 +44,7 @@ class Activation(db.Model):
     last_seen = db.Column(db.DateTime, default=datetime.datetime.utcnow)
 
 class TrialKey(db.Model):
+    __tablename__ = 'trial_key'
     id = db.Column(db.Integer, primary_key=True)
     key = db.Column(db.String, unique=True, nullable=False)  # UUID per installer
     used = db.Column(db.Boolean, default=False)
@@ -75,6 +80,40 @@ def require_admin():
     key = request.headers.get("X-API-KEY")
     if not key or key != ADMIN_API_KEY:
         abort(401)
+
+
+def init_database():
+    """Initialize database tables"""
+    try:
+        print("Initializing database...")
+        db.create_all()
+        print("Database tables created successfully!")
+        
+        # Verify tables exist
+        inspector = db.inspect(db.engine)
+        tables = inspector.get_table_names()
+        print(f"Tables in database: {tables}")
+        
+        if 'trial_key' not in tables:
+            print("WARNING: trial_key table not found!")
+            # Force create the table
+            TrialKey.__table__.create(db.engine, checkfirst=True)
+            print("Created trial_key table manually")
+            
+        if 'license' not in tables:
+            print("WARNING: license table not found!")
+            License.__table__.create(db.engine, checkfirst=True)
+            print("Created license table manually")
+            
+        if 'activation' not in tables:
+            print("WARNING: activation table not found!")
+            Activation.__table__.create(db.engine, checkfirst=True)
+            print("Created activation table manually")
+            
+    except Exception as e:
+        print(f"Database initialization error: {e}")
+        raise
+
 
 # ---------------- ADMIN ENDPOINTS ----------------
 @app.route("/admin/create_paid", methods=["POST"])
@@ -164,6 +203,17 @@ def activate():
     db.session.commit()
     return jsonify({"token": token, "expiry": expiry.isoformat(), "kind": "trial", "offline_grace_days": OFFLINE_GRACE_DAYS})
 
+
+@app.route("/admin/init_db", methods=["POST"])
+def admin_init_db():
+    """Force database initialization"""
+    require_admin()
+    try:
+        init_database()
+        return jsonify({"message": "Database initialized successfully"})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 @app.route("/verify", methods=["POST"])
 def verify():
     data = request.get_json() or {}
@@ -210,8 +260,24 @@ def deactivate():
         db.session.commit()
     return jsonify({"ok": True})
 
+# # ---------------- INIT ----------------
+# if __name__ == "__main__":
+#     with app.app_context():
+#         db.create_all()
+#     app.run(host="0.0.0.0", port=PORT)
+
 # ---------------- INIT ----------------
+def create_app():
+    """Application factory"""
+    with app.app_context():
+        init_database()
+    return app
+
 if __name__ == "__main__":
     with app.app_context():
-        db.create_all()
+        init_database()
     app.run(host="0.0.0.0", port=PORT)
+else:
+    # For production WSGI servers
+    with app.app_context():
+        init_database()
