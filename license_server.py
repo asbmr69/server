@@ -203,6 +203,30 @@ def activate():
     db.session.commit()
     return jsonify({"token": token, "expiry": expiry.isoformat(), "kind": "trial", "offline_grace_days": OFFLINE_GRACE_DAYS})
 
+@app.route("/validate", methods=["POST"])
+def validate():
+    data = request.json
+    trial_key = data.get("trial_key")
+    hwid = data.get("hwid")
+
+    tk = TrialKey.query.filter_by(key=trial_key).first()
+    if not tk:
+        return jsonify({"valid": False}), 401
+
+    if tk.used and tk.activated_hwid != hwid:
+        return jsonify({"valid": False}), 401
+
+    # Bind key to hwid first time
+    if not tk.activated_hwid:
+        tk.activated_hwid = hwid
+        tk.used = True
+        db.session.commit()
+
+    # Expiry check
+    if tk.used_at and datetime.utcnow() > tk.used_at + datetime.timedelta(days=2):
+        return jsonify({"valid": False}), 401
+
+    return jsonify({"valid": True})
 
 @app.route("/admin/init_db", methods=["POST"])
 def admin_init_db():
